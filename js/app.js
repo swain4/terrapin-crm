@@ -390,7 +390,24 @@ window.APP = (function () {
       appEl.appendChild(el('section', { class: 'view' }, [errorBlock('Admin tools are limited to office/admin users.')]));
       return;
     }
-    var f = {};
+    var container = el('section', { class: 'view' }, [loadingBlock('Loading pricing options…')]);
+    appEl.appendChild(container);
+    API.call('getOptions', {}).then(function (resp) {
+      clear(container);
+      buildNewJobForm(container, resp.data || {});
+    }).catch(function (e) {
+      clear(container);
+      container.appendChild(errorBlock(e.message, viewAdmin));
+    });
+  }
+
+  /** Build the New Job form: job info + a live pricing builder + proposal generation. */
+  function buildNewJobForm(container, options) {
+    var catalog = options.PricingCatalog || [];
+    var defaultDeposit = options.DefaultDepositPercent || 50;
+    var f = {};       // job-info inputs, keyed by Jobs header name
+    var rows = [];     // pricing row state: { include, description, qty, unit, unitPrice, catalog, qtyTouched }
+
     function field(label, key, opts) {
       opts = opts || {};
       var input = opts.options
@@ -399,39 +416,192 @@ window.APP = (function () {
       f[key] = input;
       return el('label', { class: 'field' }, [el('span', {}, label), input]);
     }
-    appEl.appendChild(el('section', { class: 'view' }, [
-      el('h2', {}, 'New job'),
-      el('p', { class: 'muted small' }, 'Creates a job and assigns the next Site ID automatically.'),
-      el('div', { class: 'form' }, [
-        field('Homeowner first name', 'Homeowner First Name'),
-        field('Homeowner last name', 'Homeowner Last Name'),
-        field('Property address', 'Property Address'),
-        field('City', 'City'), field('State', 'State'), field('ZIP', 'ZIP'),
-        field('Phone', 'Phone', { type: 'tel' }), field('Email', 'Email', { type: 'email' }),
-        field('Roofing company', 'Roofing Company'),
-        field('Assigned installers (emails)', 'Assigned Installers'),
-        field('Crew', 'Assigned Crew', { options: ['RTC'] }),
-        el('button', { class: 'btn primary', onclick: function () { submitNewJob(f); } }, 'Create job')
+
+    // ---- Job info fields ----
+    var panelCountField = field('Panel count', 'Panel Count', { type: 'number' });
+    var panelCountInput = f['Panel Count']; // the actual <input>; panelCountField is its wrapping <label>
+    panelCountInput.addEventListener('input', function () { recalcPanelDrivenQty(); });
+
+    var infoFields = [
+      field('Job type', 'Job Type', { options: options['Job Types'] || ['Detach & Reinstall'] }),
+      field('Homeowner first name', 'Homeowner First Name'),
+      field('Homeowner last name', 'Homeowner Last Name'),
+      field('Property address', 'Property Address'),
+      field('City', 'City'), field('State', 'State'), field('ZIP', 'ZIP'),
+      field('Phone', 'Phone', { type: 'tel' }), field('Email', 'Email', { type: 'email' }),
+      field('Insurance claim #', 'Insurance Claim #'),
+      field('Roofing company', 'Roofing Company'),
+      field('Roofer contact', 'Roofer Contact'),
+      field('Roofer phone/email', 'Roofer Phone/Email'),
+      panelCountField,
+      field('System size (kW)', 'System Size (kW)', { type: 'number' }),
+      field('Inverter manufacturer', 'Inverter Manufacturer'),
+      field('Roof type', 'Roof Type', { options: options['Roof Types'] || ['Comp Shingle'] }),
+      field('Stories', 'Number of Stories', { options: ['1', '2', '3+'] }),
+      field('Detach date', 'Deinstall Date', { type: 'date' }),
+      field('Reinstall date', 'Reinstall Date', { type: 'date' }),
+      field('Assigned installers (emails)', 'Assigned Installers'),
+      field('Crew', 'Assigned Crew', { options: ['RTC'] })
+    ];
+
+    // ---- Pricing builder ----
+    var pricingBody = el('div', { class: 'list' });
+    var subtotalEl = el('span', { class: 'strong' }, '$0.00');
+    var grandTotalEl = el('span', { class: 'strong' }, '$0.00');
+    var depositDueEl = el('span', { class: 'strong' }, '$0.00');
+    var balanceDueEl = el('span', { class: 'strong' }, '$0.00');
+    var discountInput = el('input', { type: 'number', step: '0.01', value: '0', oninput: recalcTotals });
+    var taxInput = el('input', { type: 'number', step: '0.01', value: '0', oninput: recalcTotals });
+    var depositPctInput = el('input', { type: 'number', step: '1', value: String(defaultDeposit), oninput: recalcTotals });
+
+    catalog.forEach(function (cat) {
+      var include = el('input', { type: 'checkbox', onchange: recalcTotals });
+      include.checked = !!cat.defaultInclude;
+      var desc = el('input', { type: 'text', value: cat.description || '' });
+      var qty = el('input', { type: 'number', step: '0.01', oninput: function () { row.qtyTouched = true; recalcTotals(); } });
+      var unit = el('input', { type: 'text', value: cat.unit || '', class: 'small' });
+      var price = el('input', { type: 'number', step: '0.01', value: String(cat.unitPrice || 0), oninput: recalcTotals });
+      var lineTotalEl = el('span', {}, '$0.00');
+
+      var row = { catalog: cat, include: include, desc: desc, qty: qty, unit: unit, price: price, lineTotalEl: lineTotalEl, qtyTouched: false };
+      qty.value = cat.qtyMode === 'panelCount' ? (Number(panelCountInput.value) || 0) : (cat.qty || 0);
+      rows.push(row);
+
+      pricingBody.appendChild(el('div', { class: 'card' }, [
+        el('div', { class: 'form', style: 'gap:6px' }, [
+          el('label', { class: 'field', style: 'flex-direction:row; align-items:center; gap:8px' }, [
+            include, el('span', { class: 'strong' }, cat.item)
+          ]),
+          el('label', { class: 'field' }, [el('span', {}, 'Description'), desc]),
+          el('div', { class: 'quick-actions' }, [
+            el('label', { class: 'field', style: 'flex:1' }, [el('span', {}, 'Qty'), qty]),
+            el('label', { class: 'field', style: 'flex:1' }, [el('span', {}, 'Unit'), unit]),
+            el('label', { class: 'field', style: 'flex:1' }, [el('span', {}, 'Unit price ($)'), price])
+          ]),
+          el('div', { class: 'muted small' }, ['Line total: ', lineTotalEl])
+        ])
+      ]));
+    });
+
+    function recalcPanelDrivenQty() {
+      rows.forEach(function (row) {
+        if (row.catalog.qtyMode === 'panelCount' && !row.qtyTouched) {
+          row.qty.value = Number(panelCountInput.value) || 0;
+        }
+      });
+      recalcTotals();
+    }
+
+    function money(n) { return '$' + (Number(n) || 0).toFixed(2); }
+
+    function recalcTotals() {
+      var subtotal = 0;
+      rows.forEach(function (row) {
+        var qty = Number(row.qty.value) || 0;
+        var price = Number(row.price.value) || 0;
+        var lineTotal = row.include.checked ? qty * price : 0;
+        row.lineTotalEl.textContent = money(lineTotal);
+        subtotal += lineTotal;
+      });
+      var discount = Number(discountInput.value) || 0;
+      var tax = Number(taxInput.value) || 0;
+      var grandTotal = subtotal + discount + tax;
+      var depositPct = Number(depositPctInput.value) || 0;
+      var depositDue = Math.round(grandTotal * (depositPct / 100) * 100) / 100;
+      var balanceDue = Math.round((grandTotal - depositDue) * 100) / 100;
+      subtotalEl.textContent = money(subtotal);
+      grandTotalEl.textContent = money(grandTotal);
+      depositDueEl.textContent = money(depositDue);
+      balanceDueEl.textContent = money(balanceDue);
+    }
+    recalcTotals();
+
+    var resultBox = el('div', { id: 'adminResult' });
+
+    container.appendChild(el('div', { class: 'view' }, [
+      el('h2', {}, 'New job & proposal'),
+      el('p', { class: 'muted small' }, 'Creates the job, assigns the next Site ID, and generates the Proposal PDF — same document you already use, filled in automatically. Every price below is a starting default; change anything as needed.'),
+      el('h3', {}, 'Job info'),
+      el('div', { class: 'form' }, infoFields),
+      el('h3', {}, 'Pricing schedule'),
+      el('p', { class: 'muted small' }, 'Check "Include" for every line that applies to this job. Qty for panel-based rows follows Panel Count above until you edit that row’s Qty directly.'),
+      pricingBody,
+      el('div', { class: 'detail-section' }, [
+        el('div', { class: 'detail-row' }, [el('span', { class: 'detail-k' }, 'Subtotal'), subtotalEl]),
+        el('label', { class: 'field' }, [el('span', {}, 'Discount (enter negative to reduce total, e.g. -100)'), discountInput]),
+        el('label', { class: 'field' }, [el('span', {}, 'Tax / Fees ($)'), taxInput]),
+        el('div', { class: 'detail-row' }, [el('span', { class: 'detail-k strong' }, 'Grand total'), grandTotalEl]),
+        el('label', { class: 'field' }, [el('span', {}, 'Deposit %'), depositPctInput]),
+        el('div', { class: 'detail-row' }, [el('span', { class: 'detail-k' }, 'Deposit due'), depositDueEl]),
+        el('div', { class: 'detail-row' }, [el('span', { class: 'detail-k' }, 'Balance due'), balanceDueEl])
       ]),
-      el('div', { id: 'adminResult' })
+      el('button', {
+        class: 'btn primary', onclick: function () { submitNewJobWithProposal(f, rows, discountInput, taxInput, depositPctInput, resultBox); }
+      }, 'Create job & generate proposal'),
+      resultBox
     ]));
   }
 
-  async function submitNewJob(f) {
+  async function submitNewJobWithProposal(f, rows, discountInput, taxInput, depositPctInput, resultBox) {
     var payload = {};
     Object.keys(f).forEach(function (k) { payload[k] = f[k].value; });
     if (!payload['Property Address']) { toast('Property address is required.', 'error'); return; }
+
+    clear(resultBox);
+    resultBox.appendChild(loadingBlock('Creating job…'));
     try {
-      var resp = await API.call('createJob', { job: payload });
-      var sid = resp.data['Site ID'];
-      toast('Created ' + sid, 'success');
-      var box = document.getElementById('adminResult');
-      clear(box);
-      box.appendChild(el('div', { class: 'notice' }, [
-        'Created ', el('strong', {}, sid), '. ',
-        linkBtn('Open job', '#/job/' + encodeURIComponent(sid), 'small')
+      var createResp = await API.call('createJob', { job: payload });
+      var sid = createResp.data['Site ID'];
+
+      resultBox.textContent = '';
+      resultBox.appendChild(loadingBlock('Generating proposal PDF…'));
+
+      var lineItems = rows.map(function (row) {
+        return {
+          item: row.catalog.item,
+          description: row.desc.value,
+          qty: Number(row.qty.value) || 0,
+          unit: row.unit.value,
+          unitPrice: Number(row.price.value) || 0,
+          include: row.include.checked
+        };
+      });
+
+      var proposalResp = await API.call('generateProposalPdf', {
+        siteId: sid,
+        jobType: payload['Job Type'],
+        insuranceClaim: payload['Insurance Claim #'],
+        rooferContact: payload['Roofer Contact'],
+        rooferPhone: payload['Roofer Phone/Email'],
+        panelCount: payload['Panel Count'],
+        systemSizeKw: payload['System Size (kW)'],
+        inverterManufacturer: payload['Inverter Manufacturer'],
+        roofType: payload['Roof Type'],
+        stories: payload['Number of Stories'],
+        detachDate: payload['Deinstall Date'],
+        reinstallDate: payload['Reinstall Date'],
+        lineItems: lineItems,
+        discount: Number(discountInput.value) || 0,
+        taxFees: Number(taxInput.value) || 0,
+        depositPercent: Number(depositPctInput.value) || 0
+      });
+
+      toast('Created ' + sid + ' and generated the proposal.', 'success');
+      clear(resultBox);
+      resultBox.appendChild(el('div', { class: 'notice' }, [
+        'Created ', el('strong', {}, sid), ' — Grand total ' +
+          '$' + Number(proposalResp.data.grandTotal).toFixed(2) + '. ',
+        el('div', { class: 'quick-actions' }, [
+          linkBtn('Open job', '#/job/' + encodeURIComponent(sid), 'small'),
+          extLinkBtn('Proposal PDF', proposalResp.data.pdfUrl, 'small'),
+          extLinkBtn('Calculator sheet', proposalResp.data.calculatorUrl, 'small')
+        ])
       ]));
-    } catch (e) { toast(e.message, 'error'); }
+    } catch (e) {
+      clear(resultBox);
+      resultBox.appendChild(errorBlock(e.message));
+      toast(e.message, 'error');
+    }
   }
 
   /* ---------------------------- shared pieces --------------------------- */
