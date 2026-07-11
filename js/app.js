@@ -293,14 +293,20 @@ window.APP = (function () {
     }
 
     // Big action buttons (only when the action/URL is available).
+    // Anything that leaves the app (Maps, PDFs, the customer folder) is a real
+    // <a target="_blank"> anchor, not a JS-triggered window.open(). A native
+    // anchor click is a single, well-defined browser action — window.open()
+    // triggered from a synthetic click can leave a stray blank tab behind on
+    // some mobile browsers (that's the extra blank-page bug). A click listener
+    // on the anchor still fires for logging; it just doesn't control navigation.
     var actions = el('div', { class: 'actions-grid' });
-    actions.appendChild(actionBtn('🗺 Open in Maps', function () { open_(mapsUrl(mapsQ)); }));
+    actions.appendChild(extActionBtn('🗺 Open in Maps', mapsUrl(mapsQ)));
     actions.appendChild(actionBtn('📋 Start Deinstall Form', function () { startForm(j['Site ID'], 'deinstall'); }));
     actions.appendChild(actionBtn('🔧 Start Reinstall Form', function () { startForm(j['Site ID'], 'reinstall'); }));
-    if (safeUrl(j['Customer Drive Folder URL'])) actions.appendChild(actionBtn('📁 Customer Folder', function () { open_(j['Customer Drive Folder URL']); logView(j, 'Opened customer folder'); }));
-    if (safeUrl(j['Proposal PDF URL'])) actions.appendChild(actionBtn('📄 Proposal PDF', function () { open_(j['Proposal PDF URL']); logView(j, 'Viewed PDF'); }));
-    if (safeUrl(j['Deinstall PDF URL'])) actions.appendChild(actionBtn('📄 Deinstall PDF', function () { open_(j['Deinstall PDF URL']); logView(j, 'Viewed PDF'); }));
-    if (safeUrl(j['Reinstall PDF URL'])) actions.appendChild(actionBtn('📄 Reinstall PDF', function () { open_(j['Reinstall PDF URL']); logView(j, 'Viewed PDF'); }));
+    if (safeUrl(j['Customer Drive Folder URL'])) actions.appendChild(extActionBtn('📁 Customer Folder', j['Customer Drive Folder URL'], function () { logView(j, 'Opened customer folder'); }));
+    if (safeUrl(j['Proposal PDF URL'])) actions.appendChild(extActionBtn('📄 Proposal PDF', j['Proposal PDF URL'], function () { logView(j, 'Viewed PDF'); }));
+    if (safeUrl(j['Deinstall PDF URL'])) actions.appendChild(extActionBtn('📄 Deinstall PDF', j['Deinstall PDF URL'], function () { logView(j, 'Viewed PDF'); }));
+    if (safeUrl(j['Reinstall PDF URL'])) actions.appendChild(extActionBtn('📄 Reinstall PDF', j['Reinstall PDF URL'], function () { logView(j, 'Viewed PDF'); }));
     actions.appendChild(actionBtn('🖼 View Job Photos', function () { viewPhotos(j['Site ID']); }));
     actions.appendChild(actionBtn('⚑ Report a Problem', function () { reportProblem(j['Site ID']); }));
     actions.appendChild(actionBtn('✔ Mark Stage Complete', function () { markStage(j['Site ID'], j['Current Job Stage']); }));
@@ -687,7 +693,13 @@ window.APP = (function () {
   function actionBtn(label, onClick) { return el('button', { class: 'action-btn', onclick: onClick }, label); }
   function linkBtn(label, href, cls) { return el('a', { class: 'btn ' + (cls || ''), href: href }, label); }
   function extLinkBtn(label, href, cls) { return el('a', { class: 'btn ' + (cls || ''), href: href, target: '_blank', rel: 'noopener' }, label); }
-  function open_(url) { var u = safeUrl(url); if (u) window.open(u, '_blank', 'noopener'); }
+  // Big action-grid button that opens an external URL (Maps, PDFs, Drive
+  // folders). A real anchor, styled like actionBtn — not a JS window.open()
+  // call — so the browser's native single-tab link behavior is what runs.
+  // onClick (optional) fires alongside the navigation, purely for logging.
+  function extActionBtn(label, href, onClick) {
+    return el('a', { class: 'action-btn', href: href, target: '_blank', rel: 'noopener', onclick: onClick }, label);
+  }
 
   function join_(a, b) { return [a, b].filter(Boolean).join(' '); }
   function asArray(data) { return Array.isArray(data) ? data : (data && data.results) || []; }

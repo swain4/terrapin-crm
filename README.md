@@ -6,13 +6,18 @@ A mobile-first website that installers and office staff sign into with their Goo
 ```
 index.html
 favicon.ico
+CNAME             ← custom domain (crm.terrapinsolarpower.com) — see "Using your own domain" below
+manifest.json     ← PWA metadata (name, icons, colors) — "Add to Home Screen"
+sw.js             ← PWA service worker — app-shell caching, instant reopen
 css/styles.css
 js/config.js      ← the ONLY file you edit (2 values)
 js/api.js         ← backend channel (POST, token auth, CORS-safe)
 js/auth.js        ← Google Sign-In + session
 js/app.js         ← router + all views (login, dashboard, search, job, upcoming, admin)
-img/logo.png            ← turtle mark used in the app bar (28×28)
-img/logo-512.png        ← turtle mark used on the login screen (96×96 display size)
+img/logo.png                  ← turtle mark used in the app bar (28×28)
+img/logo-512.png              ← turtle mark used on the login screen + PWA icon
+img/icon-192.png              ← PWA icon (Android home screen, smaller size)
+img/icon-maskable-512.png     ← PWA "maskable" icon (Android adaptive icon shapes)
 img/apple-touch-icon.png ← 180×180, used when someone adds the site to their home screen
 img/favicon-32.png, img/favicon-16.png ← browser tab icons
 ```
@@ -64,6 +69,36 @@ Open `js/config.js` and fill the two placeholders:
 4. Search `TS-2026-0001`, open the job, and confirm the buttons work: Maps, Start Deinstall Form (opens the prefilled form), View Job Photos, Mark Stage Complete.
 5. Sign in test: an account **not** in your Users tab should be rejected with a clear message.
 
+## Installing it as an app (PWA)
+The site is a Progressive Web App — installers can put it on their home screen and it opens full-screen, with its own icon, no browser address bar, and it reopens instantly even on a weak signal.
+
+**On an iPhone (Safari — must be Safari, not Chrome):**
+1. Open the site → tap the **Share** icon (square with an arrow) → **Add to Home Screen** → **Add**.
+
+**On Android (Chrome):**
+1. Open the site → Chrome shows an **Install app** banner, or tap the **⋮** menu → **Install app** / **Add to Home screen**.
+
+**On a laptop (Chrome/Edge):**
+1. Open the site → click the **install icon** in the address bar (or **⋮** menu → **Install Terrapin Solar CRM**).
+
+No setup needed on your end — `manifest.json` and `sw.js` already handle this. If you edit `app.js`/`styles.css` and a phone that already installed the app doesn't see your change right away, that's the service worker briefly serving what it has while it fetches the update in the background — it self-updates on the next open. To force-clear it immediately: on the phone, open the site in the browser (not the installed app icon) → browser menu → site settings → clear site data, or just bump `CACHE_VERSION` at the top of `sw.js` before your next deploy.
+
+## Using your own domain instead of `github.io`
+The site is now configured to use **`crm.terrapinsolarpower.com`** instead of `swain4.github.io`. GitHub Pages supports this for free — you keep hosting on GitHub, you just point your own domain at it. A `CNAME` file containing that domain is already in the repo root (that's the file GitHub Pages reads to know your custom domain), so most of the code-side setup is done. Three things are still on you, since they happen outside this repo:
+
+1. **Add a DNS record** wherever `terrapinsolarpower.com`'s DNS is managed (your registrar or DNS host — e.g. GoDaddy, Cloudflare, Google Domains/Squarespace):
+   - Type: **CNAME**
+   - Name/Host: `crm`
+   - Value/Target: `swain4.github.io`
+2. **In the repo:** GitHub → Settings → Pages → confirm **Custom domain** shows `crm.terrapinsolarpower.com` (it should pick this up automatically from the `CNAME` file once you push/upload it — if the field is empty, type it in and Save yourself).
+3. **Wait for DNS to propagate** (minutes to ~24 hours), then come back to Settings → Pages and check **Enforce HTTPS** once it's selectable (GitHub issues a free certificate for the new domain — this checkbox may take up to another 24 hours to appear after DNS resolves).
+4. **Critical — update two places that still say `swain4.github.io`, or sign-in will break on the new domain:**
+   - Google Cloud Console → your OAuth client → **Authorized JavaScript origins** → add `https://crm.terrapinsolarpower.com` (you can leave the old `github.io` origin in place too during the transition, or remove it once you've fully switched).
+   - Apps Script → Script Properties → `ALLOWED_ORIGIN` → update to `https://crm.terrapinsolarpower.com`.
+5. Once DNS resolves, your site is live at both `crm.terrapinsolarpower.com` and (unless you remove the custom domain later) the old `github.io` URL — GitHub automatically redirects the old one to the new one.
+
+If you'd rather use a different domain/subdomain than `crm.terrapinsolarpower.com`, just say so — the `CNAME` file and the two Google-side updates above all need to change together to match whatever you pick.
+
 ## What each role sees (enforced by the backend, not the page)
 - **Owner/Admin/Office** — everything, including Grand Total and the New Job form.
 - **Lead Installer** — all jobs read-only, no pricing.
@@ -75,6 +110,7 @@ Open `js/config.js` and fill the two placeholders:
 - **Signed in but "not set up in the CRM"** → add that email to the **Users** tab (Active = Yes).
 - **Everything says "not configured"** → `config.js` still has `PASTE_…` placeholders.
 - **Edited backend code but site behaves old** → deploy a **new version** of the existing web app deployment.
+- **Edited the front end but an installed phone app still looks old** → the PWA service worker is briefly serving its last cached copy; it self-updates within a few seconds of reopening online (see *Installing it as an app* above for a force-clear).
 
 ## Security notes
 - `config.js` values are safe in a public repo. Never put Sheet IDs, folder IDs, or any Script Property secret in the front end.
