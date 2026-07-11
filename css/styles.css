@@ -1,0 +1,179 @@
+/* =============================================================================
+   Terrapin Solar CRM — styles.css
+   Mobile-first, large touch targets, clean solar-company look. Brand color is a
+   placeholder green you can swap. No external fonts (fast on weak cellular).
+   ========================================================================== */
+
+:root {
+  --green: #1f4d3a;
+  --green-2: #2e7d5b;
+  --green-ink: #14352a;
+  --accent: #e0a92e;
+  --bg: #f4f6f5;
+  --card: #ffffff;
+  --ink: #1a211e;
+  --muted: #64726c;
+  --line: #e2e7e4;
+  --danger: #b3261e;
+  --ok: #2e7d5b;
+  --radius: 14px;
+  --tap: 48px;               /* minimum touch target */
+  --maxw: 720px;
+}
+
+* { box-sizing: border-box; }
+/* Elements toggled via the `hidden` attribute (appbar, drawer, toast, scrim)
+   must actually hide — some of them also carry a class that sets `display`,
+   which would otherwise beat the browser's default [hidden] rule. */
+[hidden] { display: none !important; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+  line-height: 1.45;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* --------------------------------- app bar ------------------------------ */
+.appbar {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; padding-top: calc(10px + env(safe-area-inset-top));
+  background: var(--green); color: #fff;
+  box-shadow: 0 2px 8px rgba(0,0,0,.12);
+}
+.brand { display: flex; align-items: center; gap: 8px; color: #fff; text-decoration: none; font-weight: 700; }
+.brand-mark { display: block; width: 28px; height: 28px; border-radius: 8px; flex-shrink: 0; }
+.brand-text { font-size: 17px; letter-spacing: .2px; }
+.appbar-spacer { flex: 1; }
+.user-chip { font-size: 12px; color: #d7e6df; max-width: 42vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.icon-btn {
+  min-width: var(--tap); min-height: var(--tap);
+  background: transparent; color: #fff; border: 0; font-size: 20px; border-radius: 10px; cursor: pointer;
+}
+.icon-btn:active { background: rgba(255,255,255,.15); }
+
+/* --------------------------------- drawer ------------------------------- */
+.drawer {
+  position: fixed; top: 0; left: 0; bottom: 0; z-index: 40; width: 76%; max-width: 300px;
+  background: #fff; box-shadow: 2px 0 16px rgba(0,0,0,.2);
+  display: flex; flex-direction: column; padding: 16px 0; padding-top: calc(16px + env(safe-area-inset-top));
+}
+.drawer a {
+  display: block; padding: 16px 22px; min-height: var(--tap);
+  color: var(--ink); text-decoration: none; font-size: 17px; font-weight: 600; border-bottom: 1px solid var(--line);
+}
+.drawer a:active { background: var(--bg); }
+.scrim { position: fixed; inset: 0; z-index: 35; background: rgba(0,0,0,.4); }
+
+/* --------------------------------- layout ------------------------------- */
+.app { max-width: var(--maxw); margin: 0 auto; padding: 14px 12px 40px; }
+.view > h2 { margin: 6px 2px 12px; font-size: 22px; }
+.view > h3, .detail-section h3 { margin: 20px 2px 8px; font-size: 15px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); }
+.greeting { margin: 8px 2px 14px; }
+.muted { color: var(--muted); }
+.small { font-size: 13px; }
+.strong { font-weight: 700; }
+.app-footer { text-align: center; color: var(--muted); font-size: 12px; padding: 18px; }
+
+/* --------------------------------- cards -------------------------------- */
+.card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; margin-bottom: 10px; }
+.list { display: flex; flex-direction: column; }
+
+.jobrow { display: flex; align-items: center; gap: 12px; }
+.jobrow-main { flex: 1; min-width: 0; }
+.jobrow-actions { display: flex; flex-direction: column; gap: 8px; }
+.siteid { font-weight: 800; color: var(--green-2); letter-spacing: .3px; }
+.siteid.big { font-size: 26px; }
+
+/* --------------------------------- badges ------------------------------- */
+.badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.badge { display: inline-block; font-size: 12px; font-weight: 700; padding: 3px 9px; border-radius: 999px; background: #eef3f0; color: var(--green-ink); }
+.badge.stage { background: #fbf1d8; color: #7a5b12; }
+.badge.date { background: #e7eefb; color: #26457a; }
+
+/* -------------------------------- buttons ------------------------------- */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: var(--tap); padding: 10px 16px; border-radius: 12px;
+  background: #eef3f0; color: var(--green-ink); border: 1px solid var(--line);
+  font-size: 15px; font-weight: 700; text-decoration: none; cursor: pointer;
+}
+.btn:active { transform: translateY(1px); }
+.btn.primary { background: var(--green); color: #fff; border-color: var(--green); }
+.btn.small { min-height: 40px; padding: 6px 12px; font-size: 14px; }
+
+.quick-actions { display: flex; gap: 10px; flex-wrap: wrap; margin: 6px 0 6px; }
+.quick-actions .btn { flex: 1; min-width: 120px; }
+
+/* action grid on the job page — big, well-spaced targets */
+.actions-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 14px 0; }
+.action-btn {
+  min-height: 60px; padding: 12px; border-radius: var(--radius);
+  background: #fff; border: 1.5px solid var(--line); color: var(--ink);
+  font-size: 15px; font-weight: 700; cursor: pointer; text-align: center;
+}
+.action-btn:active { background: var(--bg); transform: translateY(1px); }
+
+/* --------------------------------- job ---------------------------------- */
+.job-header { position: sticky; top: 60px; z-index: 5; background: var(--bg); padding: 10px 2px 8px; border-bottom: 1px solid var(--line); margin-bottom: 8px; }
+.safety { background: #fdecea; color: var(--danger); border: 1px solid #f5c2c0; border-radius: var(--radius); padding: 12px 14px; font-weight: 700; margin: 10px 0; }
+.notice { background: #eef3f0; border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; margin: 10px 0; }
+
+.detail-section { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 6px 14px 12px; margin-bottom: 10px; }
+.detail-row { display: flex; justify-content: space-between; gap: 14px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.detail-row:last-child { border-bottom: 0; }
+.detail-k { color: var(--muted); }
+.detail-v { font-weight: 600; text-align: right; }
+
+/* -------------------------------- photos -------------------------------- */
+.photo-list { display: flex; flex-direction: column; gap: 8px; }
+.photo-item { display: flex; flex-direction: column; padding: 12px 14px; background: #fff; border: 1px solid var(--line); border-radius: 12px; text-decoration: none; color: var(--ink); }
+.photo-doc { font-weight: 700; }
+
+/* -------------------------------- search -------------------------------- */
+.searchbox { display: flex; gap: 8px; margin-bottom: 12px; }
+.searchbox input, .field input, .field select {
+  flex: 1; width: 100%; min-height: var(--tap);
+  padding: 10px 14px; font-size: 16px; /* 16px prevents iOS zoom */
+  border: 1.5px solid var(--line); border-radius: 12px; background: #fff; color: var(--ink);
+}
+
+/* --------------------------------- forms -------------------------------- */
+.form { display: flex; flex-direction: column; gap: 12px; }
+.field { display: flex; flex-direction: column; gap: 5px; }
+.field > span { font-size: 13px; color: var(--muted); font-weight: 600; }
+
+/* --------------------------------- login -------------------------------- */
+.login { max-width: 340px; margin: 12vh auto 0; text-align: center; padding: 20px; }
+.login-mark { width: 96px; height: 96px; border-radius: 22px; box-shadow: 0 6px 20px rgba(20,53,42,.18); }
+.login h1 { font-size: 24px; margin: 14px 0 8px; }
+.gbtn { display: flex; justify-content: center; margin: 20px 0; min-height: 44px; }
+.fineprint { font-size: 12px; color: var(--muted); margin-top: 24px; }
+
+/* --------------------------------- states ------------------------------- */
+.state { text-align: center; color: var(--muted); padding: 26px 14px; }
+.state.error { color: var(--danger); }
+.state .btn { margin-top: 12px; }
+.state.loading { display: flex; align-items: center; justify-content: center; gap: 10px; }
+.spinner { width: 20px; height: 20px; border: 3px solid var(--line); border-top-color: var(--green-2); border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* --------------------------------- toast -------------------------------- */
+.toast {
+  position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom)); transform: translateX(-50%);
+  z-index: 60; max-width: 90%; padding: 12px 18px; border-radius: 12px;
+  background: var(--green-ink); color: #fff; font-weight: 600; box-shadow: 0 6px 20px rgba(0,0,0,.25);
+}
+.toast.success { background: var(--ok); }
+.toast.error { background: var(--danger); }
+
+/* --------------------------------- focus -------------------------------- */
+:focus-visible { outline: 3px solid #7fb8a1; outline-offset: 2px; }
+
+/* --------------------------- larger screens ----------------------------- */
+@media (min-width: 620px) {
+  .actions-grid { grid-template-columns: repeat(3, 1fr); }
+  .jobrow-actions { flex-direction: row; }
+}

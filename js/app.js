@@ -1,0 +1,531 @@
+/**
+ * app.js — router, views, and rendering for the Terrapin Solar CRM.
+ * =============================================================================
+ * Plain DOM (no framework). All values coming from the backend are inserted as
+ * TEXT (never innerHTML), so Sheet data can't inject markup. External links are
+ * validated to http(s) before use. Every data view shows loading, empty, and
+ * error states, and important actions ask for confirmation.
+ * =============================================================================
+ */
+window.APP = (function () {
+
+  var appEl, toastEl, loginMsg = null;
+
+  /* --------------------------- tiny DOM helpers -------------------------- */
+
+  // el('div', {class:'x', onclick:fn}, ['text', childNode])
+  function el(tag, attrs, children) {
+    var n = document.createElement(tag);
+    attrs = attrs || {};
+    Object.keys(attrs).forEach(function (k) {
+      var v = attrs[k];
+      if (v === null || v === undefined || v === false) return;
+      if (k === 'class') n.className = v;
+      else if (k === 'html') { /* intentionally unused — we avoid innerHTML */ }
+      else if (k.slice(0, 2) === 'on' && typeof v === 'function') n.addEventListener(k.slice(2), v);
+      else if (k === 'href') { var u = safeUrl(v); if (u) n.setAttribute('href', u); }
+      else n.setAttribute(k, v);
+    });
+    appendChildren(n, children);
+    return n;
+  }
+  function appendChildren(n, children) {
+    if (children === null || children === undefined) return;
+    if (!Array.isArray(children)) children = [children];
+    children.forEach(function (c) {
+      if (c === null || c === undefined || c === false) return;
+      n.appendChild(typeof c === 'string' || typeof c === 'number'
+        ? document.createTextNode(String(c)) : c);
+    });
+  }
+  function clear(n) { while (n.firstChild) n.removeChild(n.firstChild); }
+
+  // Only allow http/https/mailto/tel links (block javascript: etc.)
+  function safeUrl(u) {
+    if (!u) return null;
+    var s = String(u).trim();
+    if (/^(https?:|mailto:|tel:)/i.test(s)) return s;
+    return null;
+  }
+
+  function mapsUrl(query) {
+    return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(query || '');
+  }
+
+  function toast(message, kind) {
+    toastEl.textContent = message;
+    toastEl.className = 'toast show ' + (kind || 'info');
+    toastEl.hidden = false;
+    clearTimeout(toast._t);
+    toast._t = setTimeout(function () { toastEl.hidden = true; }, 4000);
+  }
+
+  function loadingBlock(label) {
+    return el('div', { class: 'state loading' }, [el('div', { class: 'spinner' }), label || 'Loading…']);
+  }
+  function emptyBlock(label) {
+    return el('div', { class: 'state empty' }, label || 'Nothing to show yet.');
+  }
+  function errorBlock(message, retryFn) {
+    return el('div', { class: 'state error' }, [
+      el('div', {}, message || 'Something went wrong.'),
+      retryFn ? el('button', { class: 'btn small', onclick: retryFn }, 'Try again') : null
+    ]);
+  }
+
+  /* ------------------------------ app chrome ---------------------------- */
+
+  function setChrome(signedIn) {
+    document.getElementById('appbar').hidden = !signedIn;
+    var u = AUTH.getUser();
+    var chip = document.getElementById('userChip');
+    if (u) chip.textContent = (u.name || u.email) + ' · ' + u.role;
+    // Hide admin-only nav links.
+    document.querySelectorAll('[data-admin-only]').forEach(function (a) {
+      a.style.display = AUTH.can('adminConfig') ? '' : 'none';
+    });
+  }
+
+  function initChrome() {
+    document.getElementById('signOutBtn').addEventListener('click', function () { AUTH.signOut(); });
+    var drawer = document.getElementById('drawer'), scrim = document.getElementById('scrim');
+    function closeDrawer() { drawer.hidden = true; scrim.hidden = true; }
+    document.getElementById('navToggle').addEventListener('click', function () {
+      var open = drawer.hidden; drawer.hidden = !open; scrim.hidden = !open;
+    });
+    scrim.addEventListener('click', closeDrawer);
+    drawer.querySelectorAll('[data-nav]').forEach(function (a) { a.addEventListener('click', closeDrawer); });
+  }
+
+  /* ------------------------------- router ------------------------------- */
+
+  function route() {
+    var hash = location.hash || '#/dashboard';
+    var parts = hash.replace(/^#\//, '').split('/');
+    var view = parts[0] || 'dashboard';
+
+    // Gate everything except login behind sign-in.
+    if (!AUTH.isSignedIn() && view !== 'login') { location.hash = '#/login'; return; }
+    if (AUTH.isSignedIn() && view === 'login') { location.hash = '#/dashboard'; return; }
+
+    setChrome(AUTH.isSignedIn());
+    clear(appEl);
+    window.scrollTo(0, 0);
+
+    switch (view) {
+      case 'login':     return viewLogin();
+      case 'dashboard': return viewDashboard();
+      case 'search':    return viewSearch();
+      case 'calendar':  return viewUpcoming();
+      case 'myjobs':    return viewMyJobs();
+      case 'job':       return viewJob(decodeURIComponent(parts[1] || ''));
+      case 'admin':     return viewAdmin();
+      default:          return viewDashboard();
+    }
+  }
+
+  /* ------------------------------- login -------------------------------- */
+
+  function viewLogin() {
+    var btnHolder = el('div', { class: 'gbtn' });
+    appEl.appendChild(el('section', { class: 'login' }, [
+      el('img', { class: 'login-mark', src: 'img/logo-512.png', width: '96', height: '96', alt: 'Terrapin Solar' }),
+      el('h1', {}, 'Terrapin Solar CRM'),
+      el('p', { class: 'muted' }, 'Sign in with your Terrapin Solar Google account.'),
+      loginMsg ? el('div', { class: 'notice' }, loginMsg) : null,
+      btnHolder,
+      el('p', { class: 'fineprint' }, 'Access is limited to approved company accounts.')
+    ]));
+    loginMsg = null;
+    AUTH.renderButton(btnHolder);
+  }
+
+  function flashLoginMessage(msg) { loginMsg = msg; }
+
+  /* ----------------------------- dashboard ------------------------------ */
+
+  async function viewDashboard() {
+    var u = AUTH.getUser();
+    var wrap = el('section', { class: 'view' }, [
+      el('h2', { class: 'greeting' }, 'Hi, ' + firstName(u) + ' 👋'),
+      searchBar(),
+      quickActions(),
+      el('h3', {}, 'Upcoming jobs'),
+      el('div', { id: 'dashUpcoming' }, loadingBlock()),
+      isField() ? el('h3', {}, 'My assigned jobs') : null,
+      isField() ? el('div', { id: 'dashMine' }, loadingBlock()) : null
+    ]);
+    appEl.appendChild(wrap);
+
+    loadInto('dashUpcoming', function () { return API.call('getUpcomingJobs', { days: 30 }); },
+      function (data) { return jobList(asArray(data), 'No upcoming jobs in the next 30 days.'); });
+
+    if (isField()) {
+      loadInto('dashMine', function () { return API.call('getAssignedJobs', {}); },
+        function (data) { return jobList(asArray(data), 'No jobs assigned to you yet.'); });
+    }
+  }
+
+  function quickActions() {
+    var actions = [linkBtn('Search jobs', '#/search', 'primary'),
+                   linkBtn('Upcoming', '#/calendar')];
+    if (AUTH.can('createOrEditJob')) actions.push(linkBtn('New job', '#/admin'));
+    return el('div', { class: 'quick-actions' }, actions);
+  }
+
+  /* ------------------------------- search ------------------------------- */
+
+  function viewSearch() {
+    var input = el('input', {
+      type: 'search', id: 'searchInput', placeholder: 'Site ID, name, address, phone…',
+      autocomplete: 'off', 'aria-label': 'Search jobs', enterkeyhint: 'search'
+    });
+    var results = el('div', { id: 'searchResults' }, emptyBlock('Start typing to search.'));
+    appEl.appendChild(el('section', { class: 'view' }, [
+      el('h2', {}, 'Search'),
+      el('div', { class: 'searchbox' }, [input]),
+      results
+    ]));
+    input.focus();
+
+    var timer;
+    input.addEventListener('input', function () {
+      clearTimeout(timer);
+      var q = input.value.trim();
+      if (!q) { clear(results); results.appendChild(emptyBlock('Start typing to search.')); return; }
+      timer = setTimeout(function () { doSearch(q, results); }, window.CRM_CONFIG.SEARCH_DEBOUNCE_MS);
+    });
+  }
+
+  async function doSearch(text, container) {
+    clear(container); container.appendChild(loadingBlock('Searching…'));
+    try {
+      var resp = await API.call('searchJobs', { text: text });
+      var rows = (resp.data && resp.data.results) || [];
+      clear(container);
+      if (!rows.length) { container.appendChild(emptyBlock('No matches for “' + text + '”.')); return; }
+      container.appendChild(el('div', { class: 'muted small' }, rows.length + ' result' + (rows.length === 1 ? '' : 's')));
+      container.appendChild(el('div', { class: 'list' }, rows.map(searchRow)));
+    } catch (e) {
+      clear(container); container.appendChild(errorBlock(e.message, function () { doSearch(text, container); }));
+    }
+  }
+
+  function searchRow(r) {
+    return el('div', { class: 'card jobrow' }, [
+      el('div', { class: 'jobrow-main' }, [
+        el('div', { class: 'siteid' }, r['Site ID']),
+        el('div', { class: 'strong' }, r['Homeowner'] || '—'),
+        el('div', { class: 'muted small' }, r['Property Address'] || ''),
+        el('div', { class: 'badges' }, [
+          badge(r['Job Status']), badge(r['Current Job Stage'], 'stage')
+        ])
+      ]),
+      el('div', { class: 'jobrow-actions' }, [
+        linkBtn('Open', '#/job/' + encodeURIComponent(r['Site ID']), 'primary small'),
+        extLinkBtn('Maps', mapsUrl(r['MapsQuery']), 'small')
+      ])
+    ]);
+  }
+
+  /* ---------------------------- upcoming / mine ------------------------- */
+
+  function viewUpcoming() {
+    appEl.appendChild(el('section', { class: 'view' }, [
+      el('h2', {}, 'Upcoming jobs'),
+      el('div', { class: 'muted small' }, 'Next 30 days'),
+      el('div', { id: 'upcomingList' }, loadingBlock())
+    ]));
+    loadInto('upcomingList', function () { return API.call('getUpcomingJobs', { days: 30 }); },
+      function (data) { return jobList(asArray(data), 'No upcoming jobs.'); });
+  }
+
+  function viewMyJobs() {
+    appEl.appendChild(el('section', { class: 'view' }, [
+      el('h2', {}, 'My jobs'),
+      el('div', { id: 'myList' }, loadingBlock())
+    ]));
+    loadInto('myList', function () { return API.call('getAssignedJobs', {}); },
+      function (data) { return jobList(asArray(data), 'No jobs assigned to you.'); });
+  }
+
+  /* -------------------------------- job --------------------------------- */
+
+  async function viewJob(siteId) {
+    var container = el('section', { class: 'view' }, [loadingBlock('Loading job…')]);
+    appEl.appendChild(container);
+    try {
+      var resp = await API.call('getJobById', { siteId: siteId });
+      var j = resp.data || {};
+      clear(container);
+      renderJob(container, j);
+    } catch (e) {
+      clear(container);
+      container.appendChild(errorBlock(e.message, function () { viewJob(siteId); }));
+    }
+  }
+
+  function renderJob(container, j) {
+    var name = ((j['Homeowner First Name'] || '') + ' ' + (j['Homeowner Last Name'] || '')).trim() || '—';
+    var mapsQ = [j['Property Address'], j['City'], j['State'], j['ZIP']].filter(Boolean).join(', ');
+
+    // Sticky header always shows the Site ID.
+    container.appendChild(el('div', { class: 'job-header' }, [
+      el('div', { class: 'siteid big' }, j['Site ID'] || '—'),
+      el('div', { class: 'strong' }, name),
+      el('div', { class: 'muted' }, mapsQ),
+      el('div', { class: 'badges' }, [badge(j['Job Status']), badge(j['Current Job Stage'], 'stage')])
+    ]));
+
+    // Safety notes banner (prominent).
+    if (j['Safety Notes']) {
+      container.appendChild(el('div', { class: 'safety' }, ['⚠ Safety: ', j['Safety Notes']]));
+    }
+    if (j['Special Instructions']) {
+      container.appendChild(el('div', { class: 'notice' }, ['Instructions: ', j['Special Instructions']]));
+    }
+
+    // Big action buttons (only when the action/URL is available).
+    var actions = el('div', { class: 'actions-grid' });
+    actions.appendChild(actionBtn('🗺 Open in Maps', function () { open_(mapsUrl(mapsQ)); }));
+    actions.appendChild(actionBtn('📋 Start Deinstall Form', function () { startForm(j['Site ID'], 'deinstall'); }));
+    actions.appendChild(actionBtn('🔧 Start Reinstall Form', function () { startForm(j['Site ID'], 'reinstall'); }));
+    if (safeUrl(j['Customer Drive Folder URL'])) actions.appendChild(actionBtn('📁 Customer Folder', function () { open_(j['Customer Drive Folder URL']); logView(j, 'Opened customer folder'); }));
+    if (safeUrl(j['Proposal PDF URL'])) actions.appendChild(actionBtn('📄 Proposal PDF', function () { open_(j['Proposal PDF URL']); logView(j, 'Viewed PDF'); }));
+    if (safeUrl(j['Deinstall PDF URL'])) actions.appendChild(actionBtn('📄 Deinstall PDF', function () { open_(j['Deinstall PDF URL']); logView(j, 'Viewed PDF'); }));
+    if (safeUrl(j['Reinstall PDF URL'])) actions.appendChild(actionBtn('📄 Reinstall PDF', function () { open_(j['Reinstall PDF URL']); logView(j, 'Viewed PDF'); }));
+    actions.appendChild(actionBtn('🖼 View Job Photos', function () { viewPhotos(j['Site ID']); }));
+    actions.appendChild(actionBtn('⚑ Report a Problem', function () { reportProblem(j['Site ID']); }));
+    actions.appendChild(actionBtn('✔ Mark Stage Complete', function () { markStage(j['Site ID'], j['Current Job Stage']); }));
+    container.appendChild(actions);
+
+    // Photos container (filled on demand).
+    container.appendChild(el('div', { id: 'jobPhotos' }));
+
+    // Details.
+    container.appendChild(detailSection('Schedule', [
+      ['Deinstall date', j['Deinstall Date']], ['Reinstall date', j['Reinstall Date']],
+      ['Inspection date', j['Inspection Date']], ['Assigned installers', j['Assigned Installers']],
+      ['Crew', j['Assigned Crew']]
+    ]));
+    container.appendChild(detailSection('System & roof', [
+      ['Panel count', j['Panel Count']], ['System size (kW)', j['System Size (kW)']],
+      ['Module', join_(j['Module Manufacturer'], j['Module Model'])],
+      ['Inverter', join_(j['Inverter Manufacturer'], j['Inverter Model'])],
+      ['Inverter type', j['Inverter Type']], ['Racking', j['Racking Type']],
+      ['Roof type', j['Roof Type']], ['Arrays', j['Number of Arrays']],
+      ['Stories', j['Number of Stories']], ['Roofing company', j['Roofing Company']]
+    ]));
+    container.appendChild(detailSection('Documentation', [
+      ['Status', j['Missing Documentation Status']],
+      ['Last submission', j['Last Documentation Submission']]
+    ]));
+    // Financials (only present in payload for management — the backend strips it otherwise).
+    if ('Grand Total' in j) {
+      container.appendChild(detailSection('Financial', [['Grand total', j['Grand Total']]]));
+    }
+  }
+
+  async function startForm(siteId, which) {
+    toast('Preparing prefilled form…');
+    try {
+      var resp = await API.call('generatePrefilledFormUrls', { siteId: siteId });
+      var url = which === 'reinstall' ? resp.data.reinstallUrl : resp.data.deinstallUrl;
+      if (safeUrl(url)) { open_(url); API.call('logUserAction', { action: 'Opened form', siteId: siteId }); }
+      else toast('That form link is not available.', 'error');
+    } catch (e) { toast(e.message, 'error'); }
+  }
+
+  async function viewPhotos(siteId) {
+    var box = document.getElementById('jobPhotos');
+    clear(box); box.appendChild(loadingBlock('Loading photos…'));
+    try {
+      var resp = await API.call('getApprovedJobFiles', { siteId: siteId });
+      var files = (resp.data && resp.data.files) || [];
+      clear(box);
+      if (!files.length) { box.appendChild(emptyBlock('No documentation filed for this job yet.')); return; }
+      box.appendChild(el('h3', {}, 'Job photos & files (' + files.length + ')'));
+      box.appendChild(el('div', { class: 'photo-list' }, files.map(function (f) {
+        return el('a', { class: 'photo-item', href: f.url, target: '_blank', rel: 'noopener' }, [
+          el('span', { class: 'photo-doc' }, f.documentType || 'File'),
+          el('span', { class: 'muted small' }, (f.stage || '') + ' · ' + (f.name || ''))
+        ]);
+      })));
+    } catch (e) { clear(box); box.appendChild(errorBlock(e.message, function () { viewPhotos(siteId); })); }
+  }
+
+  async function reportProblem(siteId) {
+    var note = window.prompt('Describe the problem or change-order condition:');
+    if (note === null || !note.trim()) return;
+    try {
+      await API.call('reportProblem', { siteId: siteId, note: note.trim() });
+      toast('Problem reported. The office will see it on the job.', 'success');
+    } catch (e) { toast(e.message, 'error'); }
+  }
+
+  async function markStage(siteId, currentStage) {
+    if (!window.confirm('Mark the current stage (“' + (currentStage || '') + '”) complete and advance to the next stage?')) return;
+    try {
+      var resp = await API.call('markStageComplete', { siteId: siteId });
+      toast('Stage updated to “' + (resp.data['Current Job Stage'] || '') + '”.', 'success');
+      viewJob(siteId);
+    } catch (e) { toast(e.message, 'error'); }
+  }
+
+  function logView(job, action) {
+    API.call('logUserAction', { action: action, siteId: job['Site ID'] }).catch(function () {});
+  }
+
+  /* ------------------------------- admin -------------------------------- */
+
+  function viewAdmin() {
+    if (!AUTH.can('createOrEditJob')) {
+      appEl.appendChild(el('section', { class: 'view' }, [errorBlock('Admin tools are limited to office/admin users.')]));
+      return;
+    }
+    var f = {};
+    function field(label, key, opts) {
+      opts = opts || {};
+      var input = opts.options
+        ? el('select', { id: 'f_' + key }, opts.options.map(function (o) { return el('option', {}, o); }))
+        : el('input', { id: 'f_' + key, type: opts.type || 'text', placeholder: label });
+      f[key] = input;
+      return el('label', { class: 'field' }, [el('span', {}, label), input]);
+    }
+    appEl.appendChild(el('section', { class: 'view' }, [
+      el('h2', {}, 'New job'),
+      el('p', { class: 'muted small' }, 'Creates a job and assigns the next Site ID automatically.'),
+      el('div', { class: 'form' }, [
+        field('Homeowner first name', 'Homeowner First Name'),
+        field('Homeowner last name', 'Homeowner Last Name'),
+        field('Property address', 'Property Address'),
+        field('City', 'City'), field('State', 'State'), field('ZIP', 'ZIP'),
+        field('Phone', 'Phone', { type: 'tel' }), field('Email', 'Email', { type: 'email' }),
+        field('Roofing company', 'Roofing Company'),
+        field('Assigned installers (emails)', 'Assigned Installers'),
+        field('Crew', 'Assigned Crew', { options: ['RTC'] }),
+        el('button', { class: 'btn primary', onclick: function () { submitNewJob(f); } }, 'Create job')
+      ]),
+      el('div', { id: 'adminResult' })
+    ]));
+  }
+
+  async function submitNewJob(f) {
+    var payload = {};
+    Object.keys(f).forEach(function (k) { payload[k] = f[k].value; });
+    if (!payload['Property Address']) { toast('Property address is required.', 'error'); return; }
+    try {
+      var resp = await API.call('createJob', { job: payload });
+      var sid = resp.data['Site ID'];
+      toast('Created ' + sid, 'success');
+      var box = document.getElementById('adminResult');
+      clear(box);
+      box.appendChild(el('div', { class: 'notice' }, [
+        'Created ', el('strong', {}, sid), '. ',
+        linkBtn('Open job', '#/job/' + encodeURIComponent(sid), 'small')
+      ]));
+    } catch (e) { toast(e.message, 'error'); }
+  }
+
+  /* ---------------------------- shared pieces --------------------------- */
+
+  function searchBar() {
+    var input = el('input', { type: 'search', placeholder: 'Quick search…', 'aria-label': 'Quick search',
+      onkeydown: function (ev) { if (ev.key === 'Enter' && input.value.trim()) location.hash = '#/search'; } });
+    return el('div', { class: 'searchbox' }, [
+      input, el('button', { class: 'btn', onclick: function () { location.hash = '#/search'; } }, 'Search')
+    ]);
+  }
+
+  function jobList(rows, emptyMsg) {
+    if (!rows || !rows.length) return emptyBlock(emptyMsg);
+    return el('div', { class: 'list' }, rows.map(function (j) {
+      var name = ((j['Homeowner First Name'] || '') + ' ' + (j['Homeowner Last Name'] || '')).trim();
+      var mapsQ = [j['Property Address'], j['City'], j['State'], j['ZIP']].filter(Boolean).join(', ');
+      var next = j['Deinstall Date'] || j['Reinstall Date'] || j['Inspection Date'] || '';
+      return el('div', { class: 'card jobrow' }, [
+        el('div', { class: 'jobrow-main' }, [
+          el('div', { class: 'siteid' }, j['Site ID']),
+          el('div', { class: 'strong' }, name || '—'),
+          el('div', { class: 'muted small' }, j['Property Address'] || ''),
+          el('div', { class: 'badges' }, [badge(j['Job Status']), badge(j['Current Job Stage'], 'stage'),
+            next ? badge(next, 'date') : null])
+        ]),
+        el('div', { class: 'jobrow-actions' }, [
+          linkBtn('Open', '#/job/' + encodeURIComponent(j['Site ID']), 'primary small'),
+          extLinkBtn('Maps', mapsUrl(mapsQ), 'small')
+        ])
+      ]);
+    }));
+  }
+
+  function detailSection(title, rows) {
+    var body = rows.filter(function (r) { return r[1] !== '' && r[1] !== null && r[1] !== undefined; })
+      .map(function (r) {
+        return el('div', { class: 'detail-row' }, [
+          el('span', { class: 'detail-k' }, r[0]), el('span', { class: 'detail-v' }, String(r[1]))
+        ]);
+      });
+    if (!body.length) return document.createComment('');
+    return el('div', { class: 'detail-section' }, [el('h3', {}, title), el('div', {}, body)]);
+  }
+
+  function badge(text, kind) { return text ? el('span', { class: 'badge ' + (kind || '') }, String(text)) : null; }
+  function actionBtn(label, onClick) { return el('button', { class: 'action-btn', onclick: onClick }, label); }
+  function linkBtn(label, href, cls) { return el('a', { class: 'btn ' + (cls || ''), href: href }, label); }
+  function extLinkBtn(label, href, cls) { return el('a', { class: 'btn ' + (cls || ''), href: href, target: '_blank', rel: 'noopener' }, label); }
+  function open_(url) { var u = safeUrl(url); if (u) window.open(u, '_blank', 'noopener'); }
+
+  function join_(a, b) { return [a, b].filter(Boolean).join(' '); }
+  function asArray(data) { return Array.isArray(data) ? data : (data && data.results) || []; }
+  function isField() { var u = AUTH.getUser(); return u && (u.role === 'Installer' || u.role === 'Lead Installer'); }
+  function firstName(u) { return u ? String(u.name || u.email).split(/[ @]/)[0] : ''; }
+
+  /** Generic "load into an element with states" helper. */
+  async function loadInto(elId, fetcher, renderer) {
+    var box = document.getElementById(elId);
+    if (!box) return;
+    try {
+      var resp = await fetcher();
+      clear(box);
+      box.appendChild(renderer(resp.data));
+    } catch (e) {
+      clear(box);
+      box.appendChild(errorBlock(e.message, function () { loadInto(elId, fetcher, renderer); }));
+    }
+  }
+
+  /* ------------------------------- boot --------------------------------- */
+
+  async function afterSignIn() {
+    try {
+      var resp = await API.call('getCurrentUser', {});
+      AUTH.setUser(resp.data);
+      location.hash = '#/dashboard';
+      route();
+    } catch (e) {
+      // token rejected (not approved, wrong domain, etc.)
+      flashLoginMessage(e.message);
+      location.hash = '#/login';
+      route();
+    }
+  }
+
+  function boot() {
+    appEl = document.getElementById('app');
+    toastEl = document.getElementById('toast');
+    initChrome();
+    AUTH.init(afterSignIn);
+    window.addEventListener('hashchange', route);
+    // Configuration sanity check.
+    if (!window.CRM_CONFIG || String(window.CRM_CONFIG.GOOGLE_CLIENT_ID).indexOf('PASTE_') === 0) {
+      appEl.appendChild(errorBlock('This site isn’t configured yet. Add your API URL and Client ID in js/config.js.'));
+      return;
+    }
+    route();
+  }
+
+  document.addEventListener('DOMContentLoaded', boot);
+
+  return { flashLoginMessage: flashLoginMessage, toast: toast };
+})();
