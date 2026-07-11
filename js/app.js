@@ -306,6 +306,11 @@ window.APP = (function () {
     actions.appendChild(actionBtn('✔ Mark Stage Complete', function () { markStage(j['Site ID'], j['Current Job Stage']); }));
     container.appendChild(actions);
 
+    // Filled in by startForm() once a prefilled form link is ready — a real,
+    // tappable link (not an auto-opened window), so it can never be blocked
+    // by a popup blocker on any browser.
+    container.appendChild(el('div', { id: 'formLinkArea', class: 'form-link-area' }));
+
     // Photos container (filled on demand).
     container.appendChild(el('div', { id: 'jobPhotos' }));
 
@@ -333,28 +338,45 @@ window.APP = (function () {
     }
   }
 
+  // Popup blockers on mobile Chrome/Safari are unreliable about honoring
+  // "allow popups for this site" for windows opened after an await, even
+  // when the click handler calls window.open() synchronously first (some
+  // mobile browsers block the redirect of that pre-opened blank tab too,
+  // leaving a dead about:blank tab behind). Rather than fight browser-
+  // specific popup heuristics, we don't auto-open anything. We fetch the
+  // prefilled URL, then render a real, visible <a target="_blank"> link in
+  // the job page. A direct tap on a real link is never treated as a popup
+  // by any browser, so this always works.
   async function startForm(siteId, which) {
-    // Open the tab SYNCHRONOUSLY, right here in the click handler, before any
-    // network request. If we wait for the API response first, the browser no
-    // longer treats window.open() as a direct result of the tap and silently
-    // blocks it as a popup — the form URL is ready but nothing ever opens.
-    var newTab = window.open('', '_blank', 'noopener');
-    toast('Preparing prefilled form…');
+    var label = which === 'reinstall' ? 'Reinstall' : 'Deinstall';
+    toast('Preparing ' + label.toLowerCase() + ' form…');
     try {
       var resp = await API.call('generatePrefilledFormUrls', { siteId: siteId });
       var url = which === 'reinstall' ? resp.data.reinstallUrl : resp.data.deinstallUrl;
       if (safeUrl(url)) {
-        if (newTab) { newTab.opener = null; newTab.location.href = url; }
-        else { toast('Your browser blocked the popup. Allow popups for this site and try again.', 'error'); }
+        showFormLink(which, label, url);
         API.call('logUserAction', { action: 'Opened form', siteId: siteId });
       } else {
-        if (newTab) newTab.close();
         toast('That form link is not available.', 'error');
       }
-    } catch (e) {
-      if (newTab) newTab.close();
-      toast(e.message, 'error');
-    }
+    } catch (e) { toast(e.message, 'error'); }
+  }
+
+  function showFormLink(which, label, url) {
+    var box = document.getElementById('formLinkArea');
+    if (!box) return;
+    var existing = document.getElementById('formLink-' + which);
+    if (existing) existing.remove();
+    var link = el('a', {
+      id: 'formLink-' + which,
+      class: 'form-ready-link',
+      href: url,
+      target: '_blank',
+      rel: 'noopener'
+    }, '✅ Tap to open ' + label + ' Form ↗');
+    box.appendChild(link);
+    toast(label + ' form is ready — tap the link below to open it.', 'success');
+    link.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 
   async function viewPhotos(siteId) {
