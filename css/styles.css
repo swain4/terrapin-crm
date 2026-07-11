@@ -116,6 +116,22 @@ body {
 }
 .action-btn:active { background: var(--bg); transform: translateY(1px); }
 
+/* Real tappable link rendered once a prefilled form URL is ready — never
+   auto-opened, so it can't be caught by a mobile popup blocker. */
+.form-link-area:empty { display: none; }
+.form-link-area { margin: 4px 0 14px; }
+.form-ready-link {
+  display: block; min-height: 52px; padding: 14px; border-radius: var(--radius);
+  background: var(--ok); color: #fff; border: none;
+  font-size: 15px; font-weight: 700; text-align: center; text-decoration: none;
+  animation: formLinkPulse 1.4s ease-in-out 2;
+}
+.form-ready-link:active { transform: translateY(1px); }
+@keyframes formLinkPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(0,0,0,0); }
+  50% { box-shadow: 0 0 0 6px rgba(0,0,0,.06); }
+}
+
 /* --------------------------------- job ---------------------------------- */
 .job-header { position: sticky; top: 60px; z-index: 5; background: var(--bg); padding: 10px 2px 8px; border-bottom: 1px solid var(--line); margin-bottom: 8px; }
 .safety { background: #fdecea; color: var(--danger); border: 1px solid #f5c2c0; border-radius: var(--radius); padding: 12px 14px; font-weight: 700; margin: 10px 0; }
