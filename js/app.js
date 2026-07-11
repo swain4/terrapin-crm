@@ -23,7 +23,14 @@ window.APP = (function () {
       if (k === 'class') n.className = v;
       else if (k === 'html') { /* intentionally unused — we avoid innerHTML */ }
       else if (k.slice(0, 2) === 'on' && typeof v === 'function') n.addEventListener(k.slice(2), v);
-      else if (k === 'href') { var u = safeUrl(v); if (u) n.setAttribute('href', u); }
+      else if (k === 'href') {
+        // In-app hash routes (e.g. "#/job/TS-2026-0001") are built internally by
+        // linkBtn() and are safe by construction — the dynamic part is always
+        // encodeURIComponent()'d first. Only externally-sourced links (job data:
+        // Maps, PDFs, customer folders) need the http/https/mailto/tel filter.
+        if (typeof v === 'string' && v.charAt(0) === '#') { n.setAttribute('href', v); }
+        else { var u = safeUrl(v); if (u) n.setAttribute('href', u); }
+      }
       else n.setAttribute(k, v);
     });
     appendChildren(n, children);
