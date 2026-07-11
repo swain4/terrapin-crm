@@ -334,13 +334,27 @@ window.APP = (function () {
   }
 
   async function startForm(siteId, which) {
+    // Open the tab SYNCHRONOUSLY, right here in the click handler, before any
+    // network request. If we wait for the API response first, the browser no
+    // longer treats window.open() as a direct result of the tap and silently
+    // blocks it as a popup — the form URL is ready but nothing ever opens.
+    var newTab = window.open('', '_blank', 'noopener');
     toast('Preparing prefilled form…');
     try {
       var resp = await API.call('generatePrefilledFormUrls', { siteId: siteId });
       var url = which === 'reinstall' ? resp.data.reinstallUrl : resp.data.deinstallUrl;
-      if (safeUrl(url)) { open_(url); API.call('logUserAction', { action: 'Opened form', siteId: siteId }); }
-      else toast('That form link is not available.', 'error');
-    } catch (e) { toast(e.message, 'error'); }
+      if (safeUrl(url)) {
+        if (newTab) { newTab.opener = null; newTab.location.href = url; }
+        else { toast('Your browser blocked the popup. Allow popups for this site and try again.', 'error'); }
+        API.call('logUserAction', { action: 'Opened form', siteId: siteId });
+      } else {
+        if (newTab) newTab.close();
+        toast('That form link is not available.', 'error');
+      }
+    } catch (e) {
+      if (newTab) newTab.close();
+      toast(e.message, 'error');
+    }
   }
 
   async function viewPhotos(siteId) {
