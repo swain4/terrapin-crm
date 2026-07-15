@@ -94,6 +94,7 @@ body {
 .badge { display: inline-block; font-size: 12px; font-weight: 700; padding: 3px 9px; border-radius: 999px; background: #eef3f0; color: var(--green-ink); }
 .badge.stage { background: #fbf1d8; color: #7a5b12; }
 .badge.date { background: #e7eefb; color: #26457a; }
+.badge.archived { background: #ece7f3; color: #4a3a72; }
 
 /* -------------------------------- buttons ------------------------------- */
 .btn {
@@ -105,6 +106,12 @@ body {
 .btn:active { transform: translateY(1px); }
 .btn.primary { background: var(--green); color: #fff; border-color: var(--green); }
 .btn.small { min-height: 40px; padding: 6px 12px; font-size: 14px; }
+/* Archive/restore — a reversible, low-stakes action; a muted amber is enough
+   to distinguish it from the normal green actions without alarming anyone. */
+.btn.warn { background: #fbf1d8; color: #7a5b12; border-color: #f0dfa8; }
+/* Permanent delete — the one truly irreversible action in the app. Red, and
+   never inline with the primary buttons — see .lifecycle-controls below. */
+.btn.danger { background: var(--danger); color: #fff; border-color: var(--danger); }
 
 .quick-actions { display: flex; gap: 10px; flex-wrap: wrap; margin: 6px 0 6px; }
 .quick-actions .btn { flex: 1; min-width: 120px; }
@@ -151,6 +158,14 @@ body {
 .job-header { position: sticky; top: 60px; z-index: 5; background: var(--bg); padding: 10px 2px 8px; border-bottom: 1px solid var(--line); margin-bottom: 8px; }
 .safety { background: #fdecea; color: var(--danger); border: 1px solid #f5c2c0; border-radius: var(--radius); padding: 12px 14px; font-weight: 700; margin: 10px 0; }
 .notice { background: #eef3f0; border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; margin: 10px 0; }
+
+/* Job lifecycle controls (status / archive / delete) — deliberately set apart
+   from the big action grid above so a scrolling thumb doesn't land on
+   "Permanently delete" while reaching for "Open in Maps". */
+.lifecycle-section { border-top: 2px solid var(--line); padding-top: 10px; margin-top: 18px; }
+.lifecycle-controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 8px; }
+.lifecycle-controls .field.inline { display: flex; flex-direction: row; align-items: center; gap: 8px; }
+.lifecycle-controls .field.inline select { min-height: 40px; border-radius: 10px; border: 1px solid var(--line); padding: 4px 8px; }
 
 .detail-section { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 6px 14px 12px; margin-bottom: 10px; }
 .detail-row { display: flex; justify-content: space-between; gap: 14px; padding: 8px 0; border-bottom: 1px solid var(--line); }

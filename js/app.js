@@ -91,6 +91,10 @@ window.APP = (function () {
     document.querySelectorAll('[data-admin-only]').forEach(function (a) {
       a.style.display = AUTH.can('adminConfig') ? '' : 'none';
     });
+    // Hide the Drafts & Cancelled cleanup link from anyone who can't archive.
+    document.querySelectorAll('[data-cleanup-only]').forEach(function (a) {
+      a.style.display = AUTH.can('archiveJobs') ? '' : 'none';
+    });
   }
 
   function initChrome() {
@@ -127,6 +131,7 @@ window.APP = (function () {
       case 'myjobs':    return viewMyJobs();
       case 'job':       return viewJob(decodeURIComponent(parts[1] || ''));
       case 'admin':     return viewAdmin();
+      case 'cleanup':   return viewCleanup();
       default:          return viewDashboard();
     }
   }
@@ -177,6 +182,7 @@ window.APP = (function () {
     var actions = [linkBtn('Search jobs', '#/search', 'primary'),
                    linkBtn('Upcoming', '#/calendar')];
     if (AUTH.can('createOrEditJob')) actions.push(linkBtn('New job', '#/admin'));
+    if (AUTH.can('archiveJobs')) actions.push(linkBtn('Drafts & Cancelled', '#/cleanup'));
     return el('div', { class: 'quick-actions' }, actions);
   }
 
@@ -256,23 +262,101 @@ window.APP = (function () {
       function (data) { return jobList(asArray(data), 'No jobs assigned to you.'); });
   }
 
+  /* ----------------------- drafts & cancelled cleanup --------------------- */
+
+  /**
+   * The one-stop list this whole feature exists for: every non-archived Draft
+   * or Cancelled job, with Archive/Delete right on the row — no need to open
+   * each one individually just to clear it out.
+   */
+  function viewCleanup() {
+    if (!AUTH.can('archiveJobs')) {
+      appEl.appendChild(el('section', { class: 'view' }, [errorBlock('This view is limited to owner/admin users.')]));
+      return;
+    }
+    appEl.appendChild(el('section', { class: 'view' }, [
+      el('h2', {}, 'Drafts & Cancelled'),
+      el('div', { class: 'muted small' }, 'Unsent drafts and cancelled jobs, not yet archived — clear them out here.'),
+      el('div', { id: 'cleanupList' }, loadingBlock())
+    ]));
+    loadCleanupList();
+  }
+
+  function loadCleanupList() {
+    loadInto('cleanupList', function () { return API.call('getCleanupCandidates', {}); },
+      function (data) {
+        var rows = asArray(data);
+        if (!rows.length) return emptyBlock('Nothing to clean up — no Draft or Cancelled jobs outside the archive.');
+        return el('div', { class: 'list' }, rows.map(cleanupRow));
+      });
+  }
+
+  function cleanupRow(r) {
+    var siteId = r['Site ID'];
+    return el('div', { class: 'card jobrow' }, [
+      el('div', { class: 'jobrow-main' }, [
+        el('div', { class: 'siteid' }, siteId),
+        el('div', { class: 'strong' }, r['Homeowner'] || '—'),
+        el('div', { class: 'muted small' }, r['Property Address'] || ''),
+        el('div', { class: 'badges' }, [badge(r['Job Status'])])
+      ]),
+      el('div', { class: 'jobrow-actions' }, [
+        linkBtn('Open', '#/job/' + encodeURIComponent(siteId), 'small'),
+        el('button', { class: 'btn small warn', onclick: function () { archiveFromCleanup(siteId); } }, 'Archive'),
+        el('button', { class: 'btn small danger', onclick: function () { deleteFromCleanup(siteId); } }, 'Delete')
+      ])
+    ]);
+  }
+
+  async function archiveFromCleanup(siteId) {
+    if (!window.confirm('Archive ' + siteId + '? Hidden from lists, fully reversible.')) return;
+    try {
+      await API.call('archiveJob', { siteId: siteId, archived: true });
+      toast('Job archived.', 'success');
+      loadCleanupList();
+    } catch (e) { toast(e.message, 'error'); }
+  }
+
+  async function deleteFromCleanup(siteId) {
+    var typed = window.prompt(
+      'This PERMANENTLY deletes job ' + siteId + ' — this cannot be undone.\n\n' +
+      'Type the Site ID exactly (' + siteId + ') to confirm:'
+    );
+    if (typed === null) return;
+    if (typed.trim().toUpperCase() !== String(siteId).toUpperCase()) {
+      toast('Site ID didn’t match — nothing was deleted.', 'error');
+      return;
+    }
+    try {
+      var resp = await API.call('deleteJob', { siteId: siteId, confirmSiteId: typed.trim() });
+      toast(resp.message || (siteId + ' permanently deleted.'), 'success');
+      loadCleanupList();
+    } catch (e) { toast(e.message, 'error'); }
+  }
+
   /* -------------------------------- job --------------------------------- */
 
   async function viewJob(siteId) {
     var container = el('section', { class: 'view' }, [loadingBlock('Loading job…')]);
     appEl.appendChild(container);
     try {
-      var resp = await API.call('getJobById', { siteId: siteId });
-      var j = resp.data || {};
+      // Status options are only needed for the lifecycle status-changer, which
+      // only management can see/use — skip the extra call for field roles.
+      var calls = [API.call('getJobById', { siteId: siteId })];
+      if (AUTH.can('createOrEditJob')) calls.push(API.call('getOptions', {}));
+      var results = await Promise.all(calls);
+      var j = results[0].data || {};
+      var statuses = (results[1] && results[1].data && results[1].data.Statuses) || [];
       clear(container);
-      renderJob(container, j);
+      renderJob(container, j, statuses);
     } catch (e) {
       clear(container);
       container.appendChild(errorBlock(e.message, function () { viewJob(siteId); }));
     }
   }
 
-  function renderJob(container, j) {
+  function renderJob(container, j, statuses) {
+    statuses = statuses || [];
     var name = ((j['Homeowner First Name'] || '') + ' ' + (j['Homeowner Last Name'] || '')).trim() || '—';
     var mapsQ = [j['Property Address'], j['City'], j['State'], j['ZIP']].filter(Boolean).join(', ');
 
@@ -281,7 +365,8 @@ window.APP = (function () {
       el('div', { class: 'siteid big' }, j['Site ID'] || '—'),
       el('div', { class: 'strong' }, name),
       el('div', { class: 'muted' }, mapsQ),
-      el('div', { class: 'badges' }, [badge(j['Job Status']), badge(j['Current Job Stage'], 'stage')])
+      el('div', { class: 'badges' }, [badge(j['Job Status']), badge(j['Current Job Stage'], 'stage'),
+        String(j['Archived']).toLowerCase() === 'yes' ? badge('Archived', 'archived') : null])
     ]));
 
     // Safety notes banner (prominent).
@@ -342,6 +427,95 @@ window.APP = (function () {
     if ('Grand Total' in j) {
       container.appendChild(detailSection('Financial', [['Grand total', j['Grand Total']]]));
     }
+
+    // Job lifecycle: change status, archive/restore, permanently delete.
+    // Kept visually separate (its own bordered section, buttons color-coded
+    // amber/red) from the big action grid above so it's never one mis-tap
+    // away from "Open in Maps" — see .lifecycle-section in styles.css.
+    if (AUTH.can('createOrEditJob') || AUTH.can('archiveJobs') || AUTH.can('hardDeleteJobs')) {
+      var lifecycle = el('div', { class: 'detail-section lifecycle-section' }, [el('h3', {}, 'Job lifecycle')]);
+      var controls = el('div', { class: 'lifecycle-controls' });
+
+      if (AUTH.can('createOrEditJob') && statuses.length) {
+        var statusSelect = el('select', {}, statuses.map(function (s) {
+          var opt = el('option', { value: s }, s);
+          if (s === j['Job Status']) opt.setAttribute('selected', 'selected');
+          return opt;
+        }));
+        controls.appendChild(el('label', { class: 'field inline' }, [
+          el('span', {}, 'Status'),
+          statusSelect,
+          el('button', {
+            class: 'btn small',
+            onclick: function () { changeStatus(j['Site ID'], statusSelect.value); }
+          }, 'Update')
+        ]));
+      }
+
+      if (AUTH.can('archiveJobs')) {
+        var isArchived = String(j['Archived']).toLowerCase() === 'yes';
+        controls.appendChild(el('button', {
+          class: 'btn small warn',
+          onclick: function () { toggleArchive(j['Site ID'], !isArchived); }
+        }, isArchived ? '♻ Restore job' : '🗄 Archive job'));
+      }
+
+      if (AUTH.can('hardDeleteJobs')) {
+        controls.appendChild(el('button', {
+          class: 'btn small danger',
+          onclick: function () { hardDeleteJob(j['Site ID']); }
+        }, '🗑 Permanently delete'));
+      }
+
+      lifecycle.appendChild(controls);
+      container.appendChild(lifecycle);
+    }
+  }
+
+  /** updateJobStatus from the job page's lifecycle controls. */
+  async function changeStatus(siteId, newStatus) {
+    try {
+      var resp = await API.call('updateJobStatus', { siteId: siteId, status: newStatus });
+      toast('Status updated to “' + (resp.data['Job Status'] || newStatus) + '”.', 'success');
+      viewJob(siteId);
+    } catch (e) { toast(e.message, 'error'); }
+  }
+
+  /** Archive (soft-delete) or restore a job. Reversible — confirm, then call. */
+  async function toggleArchive(siteId, archive) {
+    var msg = archive
+      ? 'Archive ' + siteId + '? It disappears from Search, Upcoming, and My Jobs, but nothing is deleted — you can restore it any time.'
+      : 'Restore ' + siteId + ' back into normal lists?';
+    if (!window.confirm(msg)) return;
+    try {
+      await API.call('archiveJob', { siteId: siteId, archived: archive });
+      toast(archive ? 'Job archived.' : 'Job restored.', 'success');
+      viewJob(siteId);
+    } catch (e) { toast(e.message, 'error'); }
+  }
+
+  /**
+   * Permanently delete a job. This is the one truly irreversible action in the
+   * app, so on top of the backend's own safety rails (Draft/Cancelled/Archived
+   * only, exact Site ID match) the user must type the Site ID here — a plain
+   * confirm() dialog is too easy to reflexively click through.
+   */
+  async function hardDeleteJob(siteId) {
+    var typed = window.prompt(
+      'This PERMANENTLY deletes job ' + siteId + ' — this cannot be undone.\n' +
+      'Only Draft, Cancelled, or Archived jobs can be deleted this way.\n\n' +
+      'Type the Site ID exactly (' + siteId + ') to confirm:'
+    );
+    if (typed === null) return; // cancelled
+    if (typed.trim().toUpperCase() !== String(siteId).toUpperCase()) {
+      toast('Site ID didn’t match — nothing was deleted.', 'error');
+      return;
+    }
+    try {
+      var resp = await API.call('deleteJob', { siteId: siteId, confirmSiteId: typed.trim() });
+      toast(resp.message || ('Job ' + siteId + ' permanently deleted.'), 'success');
+      location.hash = '#/dashboard';
+    } catch (e) { toast(e.message, 'error'); }
   }
 
   // Popup blockers on mobile Chrome/Safari are unreliable about honoring
